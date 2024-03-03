@@ -46,32 +46,13 @@ class S6(nn.Module):
 
         self.discretize()
 
-        if DIFFERENT_H_STATES_RECURRENT_UPDATE_MECHANISM:
-            global current_batch_size
-            current_batch_size = x.size(0)
+        h = torch.zeros(x.size(0), self.seq_len, self.d_model, self.state_size, device=x.device)
+        y = torch.zeros_like(x)
 
-            if self.h.size(0) != current_batch_size:
-                different_batch_size = True
-                h_new = torch.einsum("bldn, bldn->bldn", self.dA, self.h[:current_batch_size, ...])\
-                        + rearrange(x, "b l d -> b l d 1") * self.dB
-            else:
-                different_batch_size = False
-                h_new = torch.einsum("bldn, bldn->bldn", self.dA, self.h) + rearrange(x, "b l d -> b l d 1") * self.dB
+        h = torch.einsum("bldn, bldn->bldn", self.dA, h) + rearrange(x, "b l d -> b l d 1") * self.dB
 
-            self.y = torch.einsum("bln, bldn->bld", self.C, h_new)
-
-            global temp_buffer
-            temp_buffer = h_new.detach().clone() if not self.h.requires_grad else h_new.clone()
-
-            return self.y
-        else:
-            h = torch.zeros(x.size(0), self.seq_len, self.d_model, self.state_size)
-            y = torch.zeros_like(x)
-
-            h = torch.einsum("bldn, bldn->bldn", self.dA, h) + rearrange(x, "b l d -> b l d 1") * self.dB
-
-            y = torch.einsum("bln, bldn->bld", self.C, h)
-            return y
+        y = torch.einsum("bln, bldn->bld", self.C, h)
+        return y
 
 class RMSNorm(nn.Module):
     def __init__(self, d_model, eps=1e-5):
@@ -122,3 +103,17 @@ class MambaBlock(nn.Module):
         x_combined = x_residual * x_act
         x_out = self.out_proj(x_combined)
         return x_out
+
+class Mamba(nn.Module):
+    def __init__(self, seq_len, d_model, state_size):
+        super().__init__()
+
+        self.mamba_block1 = MambaBlock(seq_len, d_model, state_size)
+        self.mamba_block2 = MambaBlock(seq_len, d_model, state_size)
+        self.mamba_block3 = MambaBlock(seq_len, d_model, state_size)
+
+    def forward(self, x):
+        x = self.mamba_block1(x)
+        x = self.mamba_block2(x)
+        x = self.mamba_block3(x)
+        return x
